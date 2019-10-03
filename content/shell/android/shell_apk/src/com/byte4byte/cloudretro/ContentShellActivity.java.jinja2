@@ -84,6 +84,8 @@ import android.Manifest;
 import android.support.v4.app.ActivityCompat;
 import android.widget.ImageView;
 
+import java.util.Locale;
+
 /**
  * Activity for managing the Content Shell.
  */
@@ -853,15 +855,23 @@ public static boolean isMediaDocument(Uri uri) {
             public void onClick(View v) {
 				//EditText edit = (EditText)findViewById(R.id.ecurl);
 				CRURL = edit.getText().toString();
-				SharedPreferences.Editor editor = sharedPref.edit();
-				editor.putString("CRURL", CRURL);
-				editor.apply();
+				String lowUrl = CRURL.toLowerCase(Locale.getDefault());
+				if (lowUrl.startsWith("http://") || lowUrl.startsWith("https://")) {
+					SharedPreferences.Editor editor = sharedPref.edit();
+					editor.putString("CRURL", CRURL);
+					editor.apply();
+					
+					edit.setVisibility(View.GONE);
+					clickButton.setVisibility(View.GONE);
 				
-				edit.setVisibility(View.GONE);
-				clickButton.setVisibility(View.GONE);
-				
-				// save value here
-                downloadNativeAdapter();
+					// save value here
+                			downloadNativeAdapter();
+				}
+				else {
+					edit.setVisibility(View.GONE);
+                                        clickButton.setVisibility(View.GONE);
+					afterDownloads();
+				}
             }
         });
 
