@@ -322,4 +322,11 @@ public class GamepadList {
     private static class LazyHolder {
         private static final GamepadList INSTANCE = new GamepadList();
     }
+	
+	public static int getDeviceIndex(int deviceId) {
+		int idx = -1;
+		GamepadDevice gamepadDevice = getInstance().getDeviceById(deviceId);
+        if (gamepadDevice == null) return idx; // Not a registered device.
+        return gamepadDevice.getIndex();
+	}
 }

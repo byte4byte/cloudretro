@@ -440,14 +440,75 @@ public static boolean isMediaDocument(Uri uri) {
 		for (int i = 0; i < fileOutput.length; i++) fileOutput[i].close();
 	}
 	
+	
+	// GET THE LAST MODIFIED TIME
+public static long LastModified(String url) throws IOException
+{
+  HttpURLConnection.setFollowRedirects(false);
+  HttpURLConnection con = (HttpURLConnection) new URL(url).openConnection();
+  long date = con.getLastModified();
+
+  //if (date == 0)
+  //  System.out.println("No last-modified information.");
+  //else
+  //  System.out.println("Last-Modified: " + new Date(date));
+
+  return date;
+}
+
+
+private void toastIt(String msg) {
+	runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+						Toast.makeText(ctx,  msg,  Toast.LENGTH_SHORT).show();
+
+					}
+	});
+}
+	
 	private void getNativeFile(String filename) {
 		try {
                     //set the download URL, a url that points to a file on the internet
                     //this is the file to be downloaded
 
                    // String filename = "libecemu.cr.so";
-
+				   
+				   long localMod = 0;
+				   
+				   	//toastIt("here1");
+				   
+				   String outDir = getFilesDir().getPath(); //"/data/data/org.chromium.content_shell_apk/files/" ; 
+				   
+				   //toastIt("here2");
+				   
+				   File file = new File(outDir, filename);
+				   
+				  // toastIt("here3");
+				   
+				   if (file.exists()) {
+					   //Toast.makeText(ctx,  "here4",  Toast.LENGTH_SHORT).show();
+						localMod = file.lastModified();
+				   }
+				   
+				//toastIt("here5");
+					
+					
+					if (localMod != 0) {
+						try {
+						long remoteMod = LastModified(CRURL + "/native/android/{{ cpu }}/" + filename);
+							if (localMod >= remoteMod && remoteMod != 0) {
+								//toastIt("filename: " + filename + "\nlocal: " + localMod + "\nremote: " + remoteMod);
+								return;
+							}
+						} catch (Exception e) {
+							toastIt(e.getMessage());
+						}
+					}
+					
                     URL url = new URL(CRURL + "/native/android/{{ cpu }}/" + filename);
+					
+					toastIt("Updating: " + filename);
 
                     //create the new connection
                     HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
@@ -469,7 +530,6 @@ public static boolean isMediaDocument(Uri uri) {
                     //which we want to save the file as.
                     //File file = new File(SDCardRoot,"somefile.ext");
 
-                    String outDir = getFilesDir().getPath(); //"/data/data/org.chromium.content_shell_apk/files/" ; 
 
                     Log.i("pepper", "writint to: " + outDir);
 					
@@ -1034,6 +1094,8 @@ public static boolean isMediaDocument(Uri uri) {
             }
             else if (actionCode == MotionEvent.ACTION_DOWN || actionCode == MotionEvent.ACTION_MOVE) {
 */
+	//Toast.makeText(ctx, "Generic Motion",  Toast.LENGTH_SHORT).show();
+
 
         float left_stick_x = cleanMotionValues(ev.getAxisValue(MotionEvent.AXIS_X));
         float left_stick_y = cleanMotionValues(ev.getAxisValue(MotionEvent.AXIS_Y));
@@ -1047,116 +1109,135 @@ public static boolean isMediaDocument(Uri uri) {
         boolean dpad_left = ev.getAxisValue(MotionEvent.AXIS_HAT_X) < -dpadThreshold;
 
         if (dpad_left || left_stick_x < 0 || right_stick_x < 0) {
-            callJS("setNavKeyDown(37);");
+            callJS("setNavKeyDown(37,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         } else {
-            callJS("setNavKeyUp(37);");
+            callJS("setNavKeyUp(37,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         }
         if (dpad_right || left_stick_x > 0 || right_stick_x > 0) {
-            callJS("setNavKeyDown(39);");
+            callJS("setNavKeyDown(39,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         } else {
-            callJS("setNavKeyUp(39);");
+            callJS("setNavKeyUp(39,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 
         }
         if (dpad_up || left_stick_y < 0 || right_stick_y < 0) {
-            callJS("setNavKeyDown(38);");
+            callJS("setNavKeyDown(38,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         } else {
-            callJS("setNavKeyUp(38);");
+            callJS("setNavKeyUp(38,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         }
         if (dpad_down || left_stick_y > 0 || right_stick_y > 0) {
-            callJS("setNavKeyDown(40);");
+            callJS("setNavKeyDown(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         } else {
-            callJS("setNavKeyUp(40);");
+            callJS("setNavKeyUp(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         }
         // }
         return super.dispatchGenericMotionEvent(ev);
     }
 
+@Override
+public boolean onKeyDown(int keyCode, KeyEvent event) {
+	//Toast.makeText(ctx, "KeyDown: " + keyCode,  Toast.LENGTH_SHORT).show();
+	 return super.onKeyDown(keyCode, event);
+}
+
+public int getDeviceIndex(int deviceId) {
+	return org.chromium.device.gamepad.GamepadList.getDeviceIndex(deviceId);
+}
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
-        callJS("setNavKeyDown(" + event.getKeyCode() + ");");
+		//toast("KeyCode: " + event.getKeyCode());
+		//Toast.makeText(ctx, "KeyCode: " + event.getKeyCode(),  Toast.LENGTH_SHORT).show();
+        
         if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(40);");
+                callJS("setNavKeyDown(40,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(40);");
+                callJS("setNavKeyUp(40,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(37);");
+                callJS("setNavKeyDown(37,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(37);");
+                callJS("setNavKeyUp(37,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             // return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(39);");
+                callJS("setNavKeyDown(39,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(39);");
+                callJS("setNavKeyUp(39,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(38);");
+                callJS("setNavKeyDown(38,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(38);");
+                callJS("setNavKeyUp(38,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(-1000);");
+                callJS("setNavKeyDown(-1000,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1000);");
+                callJS("setNavKeyUp(-1000,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(13);");
+                callJS("setNavKeyDown(13,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(13);");
+                callJS("setNavKeyUp(13,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(32);");
+                callJS("setNavKeyDown(32,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(32);");
+                callJS("setNavKeyUp(32,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(27);");
+                callJS("setNavKeyDown(27,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(27);");
+                callJS("setNavKeyUp(27,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(46);");
+                callJS("setNavKeyDown(46,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(46);");
+                callJS("setNavKeyUp(46,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
             //return true;
         }
-        if (event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
+        else if (event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(-1001);");
+                callJS("setNavKeyDown(-1001,"+ getDeviceIndex(event.getDeviceId()) + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1001);");
+                callJS("setNavKeyUp(-1001,"+ getDeviceIndex(event.getDeviceId()) + ");");
             }
 
             return true;
             //return super.dispatchKeyEvent(event);
         }
+		else {
+			if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                callJS("native_keydown(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+            } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                callJS("native_keyup(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+            }
+			//callJS("setNavKeyDown(" + event.getKeyCode() + ");");
+		}
         return super.dispatchKeyEvent(event);
     }
 
