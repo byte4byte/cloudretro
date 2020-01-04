@@ -1,0 +1,11 @@
+package com.byte4byte.cloudretro{{ bits }};
+
+import android.app.admin.DeviceAdminReceiver;
+import android.content.ComponentName;
+import android.content.Context;
+
+class MyDeviceAdminReceiver extends DeviceAdminReceiver {
+	public static ComponentName getComponentName(Context context) {
+		return new ComponentName(context.getApplicationContext(), MyDeviceAdminReceiver.class);
+	} 
+}

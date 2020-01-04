@@ -84,6 +84,14 @@ import android.Manifest;
 import android.support.v4.app.ActivityCompat;
 import android.widget.ImageView;
 
+import android.app.admin.DeviceAdminReceiver;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.IntentFilter;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.annotation.SuppressLint;
+
 import java.util.Locale;
 
 /**
@@ -465,6 +473,10 @@ private void toastIt(String msg) {
 
 					}
 	});
+	
+	try {
+		Thread.sleep(200);
+	} catch (Exception e) {}
 }
 	
 	private void getNativeFile(String filename) {
@@ -862,11 +874,48 @@ private void toastIt(String msg) {
 			}
 		}).start();
 	}
+	
+	private ComponentName mAdminComponentName;
+    private DevicePolicyManager mDevicePolicyManager;
+
+	@SuppressLint("NewAPi")
+	private void setKioskPolicies() throws Exception {
+		try {
+			String pkg[] = { getPackageName() };
+			mDevicePolicyManager.setLockTaskPackages(mAdminComponentName, pkg);
+		} catch (Exception e)  {}
+		startLockTask();
+		/*IntentFilter intentFilter = new IntentFilter(Intent.ACTION_MAIN);
+		intentFilter.addCategory(Intent.CATEGORY_HOME);
+		intentFilter.addCategory(Intent.CATEGORY_DEFAULT);
+		mDevicePolicyManager.addPersistentPreferredActivity(mAdminComponentName, intentFilter, new ComponentName(this, ContentShellActivity.class));
+		mDevicePolicyManager.setKeyguardDisabled(mAdminComponentName, true);*/
+		getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+	}
 
     @Override
+	@SuppressLint("NewAPi")
     protected void onCreate(final Bundle savedInstanceState) {
 
         getWindow().getDecorView().setBackgroundColor(Color.BLACK);
+		
+		ctx = this;
+		
+		if (Build.VERSION.SDK_INT >= 21) { 
+			try {
+				mAdminComponentName = MyDeviceAdminReceiver.getComponentName(this);
+				mDevicePolicyManager = (DevicePolicyManager)getSystemService(Context.DEVICE_POLICY_SERVICE);
+				//if (mDevicePolicyManager.isDeviceOwnerApp(getPackageName())) {
+					// You are the owner!
+					toastIt("Setting Kiosk Mode");
+					setKioskPolicies();
+				//} else {
+					// Please contact your system administrator
+				//}
+			} catch (Exception e) {
+				toastIt(e.getMessage());
+			}
+		}
 		
 		layoutLock = new Object();
 		exitLayoutLock = false;
@@ -879,7 +928,6 @@ private void toastIt(String msg) {
 		} 
 
         setContentView(R.layout.splashscreen);
-        ctx = this;
 		
 		doAnimLogo();
 		
@@ -1287,6 +1335,9 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 	protected void onResume() {
 		super.onResume();
 
+		try {
+			setKioskPolicies();
+		} catch (Exception e) {}
 
 		LocalBroadcastManager.getInstance(this).registerReceiver(mMessageReceiver,
                                          new IntentFilter("callJS"));

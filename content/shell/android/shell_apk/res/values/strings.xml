@@ -11,4 +11,6 @@
     <string name="url">https://cloudretro.com/</string>
     <string name="launch">Launch</string>
     <string name="browser_process_initialization_failed">Initialization failed.</string>
+	<string name="admin_description">Cloud Retro Kiosk Mode</string>
+	<string name="app_name">Cloud Retro</string>
 </resources>

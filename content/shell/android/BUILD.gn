@@ -131,6 +131,27 @@ variables = [
     "cpu=arm64",
   ] 
 }
+
+jinja_template("BootUpReceiver") {
+  testonly = true
+  input = "shell_apk/src/com/byte4byte/cloudretro/BootUpReceiver.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/BootUpReceiver.java"
+  
+variables = [
+    "bits=64",
+    "cpu=arm64",
+  ]  
+}
+jinja_template("MyDeviceAdminReceiver") {
+  testonly = true
+  input = "shell_apk/src/com/byte4byte/cloudretro/MyDeviceAdminReceiver.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/MyDeviceAdminReceiver.java"
+  
+variables = [
+    "bits=64",
+    "cpu=arm64",
+  ]  
+}
 jinja_template("ContentShellActivity") {
   testonly = true
   input = "shell_apk/src/com/byte4byte/cloudretro/ContentShellActivity.java.jinja2"
@@ -239,6 +260,27 @@ variables = [
   ]
 }
 
+jinja_template("BootUpReceiver") {
+  testonly = true
+  input = "shell_apk/src/com/byte4byte/cloudretro/BootUpReceiver.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/BootUpReceiver.java"
+
+variables = [
+    "bits=32",
+    "cpu=arm",
+  ]
+}
+jinja_template("MyDeviceAdminReceiver") {
+  testonly = true
+  input = "shell_apk/src/com/byte4byte/cloudretro/MyDeviceAdminReceiver.java.jinja2"
+  output = "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/MyDeviceAdminReceiver.java"
+
+variables = [
+    "bits=32",
+    "cpu=arm",
+  ]
+}
+
 jinja_template("ContentShellActivity") {
   testonly = true
   input = "shell_apk/src/com/byte4byte/cloudretro/ContentShellActivity.java.jinja2"
@@ -332,6 +374,8 @@ android_library("content_shell_apk_java") {
     "//content/shell/android:TestChildProcessService0",
     "//content/shell/android:TestChildProcessService",
     "//content/shell/android:ContentShellApplication",
+ "//content/shell/android:MyDeviceAdminReceiver",
+ "//content/shell/android:BootUpReceiver",
     "//content/shell/android:ContentShellActivity",
     "//content/shell/android:ChildProcessLauncherTestUtils",
     "//content/shell/android:ChildProcessLauncherTestHelperService",
@@ -344,7 +388,9 @@ android_library("content_shell_apk_java") {
     java_files = [
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/ChildProcessLauncherTestHelperService.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/ChildProcessLauncherTestUtils.java",
-    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/ContentShellActivity.java",
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/MyDeviceAdminReceiver.java",
+ "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/ContentShellActivity.java",
+ "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/BootUpReceiver.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/ContentShellApplication.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/TestChildProcessService.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro64/TestChildProcessService0.java",
@@ -356,7 +402,9 @@ android_library("content_shell_apk_java") {
     java_files = [
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/ChildProcessLauncherTestHelperService.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/ChildProcessLauncherTestUtils.java",
-    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/ContentShellActivity.java",
+    "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/MyDeviceAdminReceiver.java",
+ "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/ContentShellActivity.java",
+ "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/BootUpReceiver.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/ContentShellApplication.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/TestChildProcessService.java",
     "$target_out_dir/shell_apk/src/com/byte4byte/cloudretro32/TestChildProcessService0.java",
