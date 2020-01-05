@@ -4,7 +4,7 @@
 
 #include "ppapi/shared_impl/ppapi_switches.h"
 
-#if 0
+//#if 0
 namespace switches {
 #if defined(OS_ANDROID)
 // Enables the testing interface for PPAPI.
@@ -19,4 +19,4 @@ const char kEcLibDir[] = "ec-lib-dir";
 const char kEcWwwDir[] = "ec-www-dir";
 #endif
 }  // namespace switches
-#endif
+//#endif

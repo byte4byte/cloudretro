@@ -216,6 +216,10 @@ static LRESULT myWinProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) {
 		//return 0;
 	}
 	
+	if (msg == WM_SHOWWINDOW && wparam == TRUE) {
+		ShowWindow(hwnd, SW_MAXIMIZE);
+	}
+	
 	if (msg == WM_SIZE) {
 
 		HMONITOR hMon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
