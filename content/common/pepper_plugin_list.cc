@@ -18,6 +18,8 @@
 #include "content/public/common/pepper_plugin_info.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 
+#ifndef __ANDROID__
+
 typedef std::string (*t_GetSwitchValueASCII)(const char *str);
 typedef bool (*t_HasSwitch)(const char *str);
 typedef void (*t_AppendSwitchNative)(const char *str, wchar_t *val);
@@ -39,6 +41,8 @@ void AppendSwitchNative(const char *str, wchar_t *val) {
 }
 
 void setECEmuPath(t_GetSwitchValueASCII GetSwitchValueASCII, t_HasSwitch HasSwitch, t_AppendSwitchNative AppendSwitchNative);	
+
+#endif
 //void setECEmuPath(base::CommandLine& command_line);
 
 namespace content {

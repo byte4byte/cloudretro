@@ -1,3 +1,4 @@
+#ifndef __ANDROID__
 #include "base/command_line.h"
 #include "curl/curl.h"
 
@@ -655,4 +656,5 @@ AppendSwitchNative(
 		
 	}
 
+#endif
 #endif

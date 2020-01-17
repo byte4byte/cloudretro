@@ -880,11 +880,11 @@ private void toastIt(String msg) {
 
 	@SuppressLint("NewAPi")
 	private void setKioskPolicies() throws Exception {
-		try {
+/*		try {
 			String pkg[] = { getPackageName() };
 			mDevicePolicyManager.setLockTaskPackages(mAdminComponentName, pkg);
 		} catch (Exception e)  {}
-		startLockTask();
+		startLockTask();*/
 		/*IntentFilter intentFilter = new IntentFilter(Intent.ACTION_MAIN);
 		intentFilter.addCategory(Intent.CATEGORY_HOME);
 		intentFilter.addCategory(Intent.CATEGORY_DEFAULT);
@@ -907,7 +907,7 @@ private void toastIt(String msg) {
 				mDevicePolicyManager = (DevicePolicyManager)getSystemService(Context.DEVICE_POLICY_SERVICE);
 				//if (mDevicePolicyManager.isDeviceOwnerApp(getPackageName())) {
 					// You are the owner!
-					toastIt("Setting Kiosk Mode");
+					//toastIt("Setting Kiosk Mode");
 					setKioskPolicies();
 				//} else {
 					// Please contact your system administrator
