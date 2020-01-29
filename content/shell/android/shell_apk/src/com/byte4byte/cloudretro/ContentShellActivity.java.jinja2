@@ -896,23 +896,6 @@ private void toastIt(String msg) {
     @Override
 	@SuppressLint("NewAPi")
     protected void onCreate(final Bundle savedInstanceState) {
-		
-		navleft = false;
-		navright = false;
-		navup = false;
-		navdown = false;
-		
-		LX = 0.0f;
-		LY = 0.0f;
-		RX = 0.0f;
-		RY = 0.0f;
-		LTRIG = 0.0f;
-		RTRIG = 0.0f;
-		HATX = 0.0f;
-		HATY = 0.0f;
-		g_L = false;
-		g_R = false;
-
         getWindow().getDecorView().setBackgroundColor(Color.BLACK);
 		
 		ctx = this;
@@ -1143,21 +1126,45 @@ private void toastIt(String msg) {
         return number;
     }
 	
-	private boolean navleft;
-	private boolean navright;
-	private boolean navup;
-	private boolean navdown;
 	
-	private float LX;
-	private float LY;
-	private float RX;
-	private float RY;
-	private float LTRIG;
-	private float RTRIG;
-	private float HATX;
-	private float HATY;
-	private boolean g_L;
-	private boolean g_R;
+	
+	private class GamepadValues {
+		public boolean navleft;
+		public boolean navright;
+		public boolean navup;
+		public boolean navdown;
+	
+		public float LX;
+		public float LY;
+		public float RX;
+		public float RY;
+		public float LTRIG;
+		public float RTRIG;
+		public float HATX;
+		public float HATY;
+		public boolean g_L;
+		public boolean g_R;
+		
+		public GamepadValues() {
+			navleft = false;
+			navright = false;
+			navup = false;
+			navdown = false;
+			
+			LX = 0.0f;
+			LY = 0.0f;
+			RX = 0.0f;
+			RY = 0.0f;
+			LTRIG = 0.0f;
+			RTRIG = 0.0f;
+			HATX = 0.0f;
+			HATY = 0.0f;
+			g_L = false;
+			g_R = false;
+		}
+	}
+	
+	private HashMap<Integer, GamepadValues> gpad_vals = new HashMap<Integer, GamepadValues>();
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent ev) {
@@ -1175,6 +1182,20 @@ private void toastIt(String msg) {
             else if (actionCode == MotionEvent.ACTION_DOWN || actionCode == MotionEvent.ACTION_MOVE) {
 */
 	//Toast.makeText(ctx, "Generic Motion",  Toast.LENGTH_SHORT).show();
+	
+		int idx = getDeviceIndex(ev.getDeviceId());
+	
+		GamepadValues gvals;
+		if (gpad_vals.containsKey(idx)) {
+			gvals = gpad_vals.get(idx);
+		}
+		else {
+			gvals = new GamepadValues();
+			gpad_vals.put(idx, gvals);
+		}
+	
+		
+	
 		float lx = ev.getAxisValue(MotionEvent.AXIS_X);
 		float ly = ev.getAxisValue(MotionEvent.AXIS_Y);
 		float rx = ev.getAxisValue(MotionEvent.AXIS_Z);
@@ -1202,68 +1223,68 @@ private void toastIt(String msg) {
 		boolean r = Math.abs(right_trigger )>= 0.5f;
 
         if (dpad_left || left_stick_x < 0 || right_stick_x < 0) {
-            if (! navleft) callJS("setNavKeyDown(37,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navleft = true;
+            if (! gvals.navleft) callJS("setNavKeyDown(37,"+ idx + ");");
+			gvals.navleft = true;
         } else {
-            if (navleft) callJS("setNavKeyUp(37,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navleft = false;
+            if (gvals.navleft) callJS("setNavKeyUp(37,"+ idx + ");");
+			gvals.navleft = false;
         }
         if (dpad_right || left_stick_x > 0 || right_stick_x > 0) {
-            if (! navright) callJS("setNavKeyDown(39,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navright = true;
+            if (! gvals.navright) callJS("setNavKeyDown(39,"+ idx + ");");
+			gvals.navright = true;
         } else {
-            if (navright) callJS("setNavKeyUp(39,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navright = false;
+            if (gvals.navright) callJS("setNavKeyUp(39,"+ idx + ");");
+			gvals.navright = false;
 
         }
         if (dpad_up || left_stick_y < 0 || right_stick_y < 0) {
-            if (! navup) callJS("setNavKeyDown(38,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navup = true;
+            if (! gvals.navup) callJS("setNavKeyDown(38,"+ idx + ");");
+			gvals.navup = true;
         } else {
-            if (navup) callJS("setNavKeyUp(38,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navup = false;
+            if (gvals.navup) callJS("setNavKeyUp(38,"+ idx + ");");
+			gvals.navup = false;
         }
         if (dpad_down || left_stick_y > 0 || right_stick_y > 0) {
-            if (!navdown) callJS("setNavKeyDown(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navdown = true;
+            if (!gvals.navdown) callJS("setNavKeyDown(40,"+ idx + ");");
+			gvals.navdown = true;
         } else {
-            if (navdown) callJS("setNavKeyUp(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
-			navdown = false;
+            if (gvals.navdown) callJS("setNavKeyUp(40,"+ idx + ");");
+			gvals.navdown = false;
         }
 		
 		
-		if (ltrig != LTRIG) callJS("native_axis('LTRIG'," + ltrig + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (rtrig != RTRIG) callJS("native_axis('RTRIG'," + rtrig + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (lx != LX) callJS("native_axis('LX'," + lx + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (ly != LY) callJS("native_axis('LY'," + ly + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (rx != RX) callJS("native_axis('RX'," + rx + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (ry != RY) callJS("native_axis('RY'," + ry + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (hatx != HATX) callJS("native_axis('HATX'," + hatx + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		if (haty != HATY) callJS("native_axis('HATY'," + haty + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		if (ltrig != gvals.LTRIG) callJS("native_axis('LTRIG'," + ltrig + "," + idx + ");");
+		if (rtrig != gvals.RTRIG) callJS("native_axis('RTRIG'," + rtrig + "," + idx + ");");
+		if (lx != gvals.LX) callJS("native_axis('LX'," + lx + "," + idx + ");");
+		if (ly != gvals.LY) callJS("native_axis('LY'," + ly + "," + idx + ");");
+		if (rx != gvals.RX) callJS("native_axis('RX'," + rx + "," + idx + ");");
+		if (ry != gvals.RY) callJS("native_axis('RY'," + ry + "," + idx + ");");
+		if (hatx != gvals.HATX) callJS("native_axis('HATX'," + hatx + "," + idx + ");");
+		if (haty != gvals.HATY) callJS("native_axis('HATY'," + haty + "," + idx + ");");
 		
 		if (l) {
-			if (l != g_L) callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L) callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			if (l != g_L) callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L) callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		if (r) {
-			if (r != g_R) callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R) callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			if (r != g_R) callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R) callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		
-		g_L = l;
-		g_R = r;
-		LX = lx;
-		LY = ly;
-		LTRIG = ltrig;
-		RTRIG = rtrig;
-		RX = rx;
-		RY = ry;
-		HATX = hatx;
-		HATY = haty;
+		gvals.g_L = l;
+		gvals.g_R = r;
+		gvals.LX = lx;
+		gvals.LY = ly;
+		gvals.LTRIG = ltrig;
+		gvals.RTRIG = rtrig;
+		gvals.RX = rx;
+		gvals.RY = ry;
+		gvals.HATX = hatx;
+		gvals.HATY = haty;
 		
 		
         // }
