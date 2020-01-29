@@ -1184,6 +1184,14 @@ private void toastIt(String msg) {
             callJS("setNavKeyUp(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         }
 		
+		
+		callJS("native_axis('LTRIG'," + left_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RTRIG'," + right_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('LX'," + ev.getAxisValue(MotionEvent.AXIS_X) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('LY'," + ev.getAxisValue(MotionEvent.AXIS_Y) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RX'," + ev.getAxisValue(MotionEvent.AXIS_Z) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RY'," + ev.getAxisValue(MotionEvent.AXIS_RZ) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		
 		if (L) {
 			callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
@@ -1197,12 +1205,7 @@ private void toastIt(String msg) {
 			callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		
-		callJS("native_axis('LTRIG'," + left_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		callJS("native_axis('RTRIG'," + right_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		callJS("native_axis('LX'," + ev.getAxisValue(MotionEvent.AXIS_X) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		callJS("native_axis('LY'," + ev.getAxisValue(MotionEvent.AXIS_Y) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		callJS("native_axis('RX'," + ev.getAxisValue(MotionEvent.AXIS_Z) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
-		callJS("native_axis('RY'," + ev.getAxisValue(MotionEvent.AXIS_RZ) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		
 		
 		
         // }
