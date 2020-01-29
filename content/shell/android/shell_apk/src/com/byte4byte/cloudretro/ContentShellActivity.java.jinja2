@@ -1149,12 +1149,18 @@ private void toastIt(String msg) {
         float left_stick_y = cleanMotionValues(ev.getAxisValue(MotionEvent.AXIS_Y));
         float right_stick_x = cleanMotionValues(ev.getAxisValue(MotionEvent.AXIS_Z));
         float right_stick_y = cleanMotionValues(ev.getAxisValue(MotionEvent.AXIS_RZ));
-        // float left_trigger = ev.getAxisValue(MotionEvent.AXIS_LTRIGGER);
-        //float right_trigger = ev.getAxisValue(MotionEvent.AXIS_RTRIGGER);
+        float left_trigger = ev.getAxisValue(MotionEvent.AXIS_LTRIGGER);
+        float right_trigger = ev.getAxisValue(MotionEvent.AXIS_RTRIGGER);
         boolean dpad_down = ev.getAxisValue(MotionEvent.AXIS_HAT_Y) > dpadThreshold;
         boolean dpad_up = ev.getAxisValue(MotionEvent.AXIS_HAT_Y) < -dpadThreshold;
         boolean dpad_right = ev.getAxisValue(MotionEvent.AXIS_HAT_X) > dpadThreshold;
         boolean dpad_left = ev.getAxisValue(MotionEvent.AXIS_HAT_X) < -dpadThreshold;
+		
+		left_trigger = cleanMotionValues(left_trigger);
+		right_trigger = cleanMotionValues(right_trigger);
+		
+		boolean L = Math.abs(left_trigger) >= 0.5f;
+		boolean R = Math.abs(right_trigger )>= 0.5f;
 
         if (dpad_left || left_stick_x < 0 || right_stick_x < 0) {
             callJS("setNavKeyDown(37,"+ getDeviceIndex(ev.getDeviceId()) + ");");
@@ -1177,6 +1183,28 @@ private void toastIt(String msg) {
         } else {
             callJS("setNavKeyUp(40,"+ getDeviceIndex(ev.getDeviceId()) + ");");
         }
+		
+		if (L) {
+			callJS("native_keydown(3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+		}
+		else {
+			callJS("native_keyup(3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+		}
+		if (R) {
+			callJS("native_keydown(3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+		}
+		else {
+			callJS("native_keyup(3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+		}
+		
+		callJS("native_axis('LTRIG'," + left_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RTRIG'," + right_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('LX'," + ev.getAxisValue(MotionEvent.AXIS_X) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('LY'," + ev.getAxisValue(MotionEvent.AXIS_Y) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RX'," + ev.getAxisValue(MotionEvent.AXIS_Z) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('RY'," + ev.getAxisValue(MotionEvent.AXIS_RZ) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		
+		
         // }
         return super.dispatchGenericMotionEvent(ev);
     }
