@@ -1191,6 +1191,8 @@ private void toastIt(String msg) {
 		callJS("native_axis('LY'," + ev.getAxisValue(MotionEvent.AXIS_Y) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
 		callJS("native_axis('RX'," + ev.getAxisValue(MotionEvent.AXIS_Z) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
 		callJS("native_axis('RY'," + ev.getAxisValue(MotionEvent.AXIS_RZ) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('HATX'," + ev.getAxisValue(MotionEvent.AXIS_HAT_X) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
+		callJS("native_axis('HATY'," + ev.getAxisValue(MotionEvent.AXIS_HAT_Y) + "," + getDeviceIndex(ev.getDeviceId()) + ");");
 		
 		if (L) {
 			callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
@@ -1226,6 +1228,12 @@ public int getDeviceIndex(int deviceId) {
     public boolean dispatchKeyEvent(KeyEvent event) {
 		//toast("KeyCode: " + event.getKeyCode());
 		//Toast.makeText(ctx, "KeyCode: " + event.getKeyCode(),  Toast.LENGTH_SHORT).show();
+		
+		if (event.getAction() == KeyEvent.ACTION_DOWN) {
+			callJS("native_keydown(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+		} else if (event.getAction() == KeyEvent.ACTION_UP) {
+			callJS("native_keyup(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+		}
         
         if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
@@ -1310,11 +1318,7 @@ public int getDeviceIndex(int deviceId) {
             //return super.dispatchKeyEvent(event);
         }
 		else {
-			if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("native_keydown(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
-            } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("native_keyup(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
-            }
+			
 			//callJS("setNavKeyDown(" + event.getKeyCode() + ");");
 		}
         return super.dispatchKeyEvent(event);
