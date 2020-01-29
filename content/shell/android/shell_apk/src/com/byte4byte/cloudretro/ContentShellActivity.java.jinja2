@@ -1185,16 +1185,16 @@ private void toastIt(String msg) {
         }
 		
 		if (L) {
-			callJS("native_keydown(3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			callJS("native_keyup(3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		if (R) {
-			callJS("native_keydown(3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			callJS("native_keyup(3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		
 		callJS("native_axis('LTRIG'," + left_trigger + "," + getDeviceIndex(ev.getDeviceId()) + ");");
