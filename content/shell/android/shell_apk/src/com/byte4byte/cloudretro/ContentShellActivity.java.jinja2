@@ -1265,16 +1265,16 @@ private void toastIt(String msg) {
 		if (haty != gvals.HATY || newidx) callJS("native_axis('HATY'," + haty + "," + idx + ");");
 		
 		if (l) {
-			if (l != gvals.g_L || newidx) callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L || newidx) callJS("native_keydown(-3000,"+ idx + ");");
 		}
 		else {
-			if (l != gvals.g_L || newidx) callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L || newidx) callJS("native_keyup(-3000,"+ idx + ");");
 		}
 		if (r) {
-			if (r != gvals.g_R || newidx) callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R || newidx) callJS("native_keydown(-3001,"+ idx + ");");
 		}
 		else {
-			if (r != gvals.g_R || newidx) callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R || newidx) callJS("native_keyup(-3001,"+ idx + ");");
 		}
 		
 		gvals.g_L = l;
@@ -1308,89 +1308,91 @@ public int getDeviceIndex(int deviceId) {
 		//toast("KeyCode: " + event.getKeyCode());
 		//Toast.makeText(ctx, "KeyCode: " + event.getKeyCode(),  Toast.LENGTH_SHORT).show();
 		
-		if (event.getAction() == KeyEvent.ACTION_DOWN) {
-			callJS("native_keydown(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+		int idx = getDeviceIndex(event.getDeviceId());
+		
+		if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+			callJS("native_keydown(" + event.getKeyCode() + "," + idx + ");");
 		} else if (event.getAction() == KeyEvent.ACTION_UP) {
-			callJS("native_keyup(" + event.getKeyCode() + "," + getDeviceIndex(event.getDeviceId()) + ");");
+			callJS("native_keyup(" + event.getKeyCode() + "," + idx + ");");
 		}
         
         if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_DOWN) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(40,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(40,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(40,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(40,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(37,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(37,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(37,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(37,"+ idx + ");");
             }
             // return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(39,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(39,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(39,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(39,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(38,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(38,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(38,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(38,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BACK) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(-1000,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(-1000,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1000,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(-1000,"+ idx + ");");
             }
             return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_A) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(13,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(13,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(13,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(13,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_X) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(32,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(32,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(32,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(32,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_B) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(27,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(27,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(27,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(27,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(46,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyDown(46,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(46,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(46,"+ idx + ");");
             }
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_MENU) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                callJS("setNavKeyDown(-1001,"+ getDeviceIndex(event.getDeviceId()) + ");");
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+                callJS("setNavKeyDown(-1001,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                callJS("setNavKeyUp(-1001,"+ getDeviceIndex(event.getDeviceId()) + ");");
+                callJS("setNavKeyUp(-1001,"+ idx + ");");
             }
 
             return true;
