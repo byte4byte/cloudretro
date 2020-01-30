@@ -1381,7 +1381,7 @@ public int getDeviceIndex(int deviceId) {
             //return true;
         }
         else if (event.getKeyCode() == KeyEvent.KEYCODE_BUTTON_Y) {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
                 callJS("setNavKeyDown(46,"+ idx + ");");
             } else if (event.getAction() == KeyEvent.ACTION_UP) {
                 callJS("setNavKeyUp(46,"+ idx + ");");
