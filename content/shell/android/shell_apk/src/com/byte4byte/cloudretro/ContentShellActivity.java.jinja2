@@ -1184,6 +1184,7 @@ private void toastIt(String msg) {
 	//Toast.makeText(ctx, "Generic Motion",  Toast.LENGTH_SHORT).show();
 	
 		int idx = getDeviceIndex(ev.getDeviceId());
+		boolean newidx = false;
 	
 		GamepadValues gvals;
 		if (gpad_vals.containsKey(idx)) {
@@ -1192,6 +1193,7 @@ private void toastIt(String msg) {
 		else {
 			gvals = new GamepadValues();
 			gpad_vals.put(idx, gvals);
+			newidx = true;
 		}
 	
 		
@@ -1223,56 +1225,56 @@ private void toastIt(String msg) {
 		boolean r = Math.abs(right_trigger )>= 0.5f;
 
         if (dpad_left || left_stick_x < 0 || right_stick_x < 0) {
-            if (! gvals.navleft) callJS("setNavKeyDown(37,"+ idx + ");");
+            if (! gvals.navleft || newidx) callJS("setNavKeyDown(37,"+ idx + ");");
 			gvals.navleft = true;
         } else {
-            if (gvals.navleft) callJS("setNavKeyUp(37,"+ idx + ");");
+            if (gvals.navleft || newidx) callJS("setNavKeyUp(37,"+ idx + ");");
 			gvals.navleft = false;
         }
         if (dpad_right || left_stick_x > 0 || right_stick_x > 0) {
-            if (! gvals.navright) callJS("setNavKeyDown(39,"+ idx + ");");
+            if (! gvals.navright || newidx) callJS("setNavKeyDown(39,"+ idx + ");");
 			gvals.navright = true;
         } else {
-            if (gvals.navright) callJS("setNavKeyUp(39,"+ idx + ");");
+            if (gvals.navright || newidx) callJS("setNavKeyUp(39,"+ idx + ");");
 			gvals.navright = false;
 
         }
         if (dpad_up || left_stick_y < 0 || right_stick_y < 0) {
-            if (! gvals.navup) callJS("setNavKeyDown(38,"+ idx + ");");
+            if (! gvals.navup || newidx) callJS("setNavKeyDown(38,"+ idx + ");");
 			gvals.navup = true;
         } else {
-            if (gvals.navup) callJS("setNavKeyUp(38,"+ idx + ");");
+            if (gvals.navup || newidx) callJS("setNavKeyUp(38,"+ idx + ");");
 			gvals.navup = false;
         }
         if (dpad_down || left_stick_y > 0 || right_stick_y > 0) {
-            if (!gvals.navdown) callJS("setNavKeyDown(40,"+ idx + ");");
+            if (!gvals.navdown || newidx) callJS("setNavKeyDown(40,"+ idx + ");");
 			gvals.navdown = true;
         } else {
-            if (gvals.navdown) callJS("setNavKeyUp(40,"+ idx + ");");
+            if (gvals.navdown || newidx) callJS("setNavKeyUp(40,"+ idx + ");");
 			gvals.navdown = false;
         }
 		
 		
-		if (ltrig != gvals.LTRIG) callJS("native_axis('LTRIG'," + ltrig + "," + idx + ");");
-		if (rtrig != gvals.RTRIG) callJS("native_axis('RTRIG'," + rtrig + "," + idx + ");");
-		if (lx != gvals.LX) callJS("native_axis('LX'," + lx + "," + idx + ");");
-		if (ly != gvals.LY) callJS("native_axis('LY'," + ly + "," + idx + ");");
-		if (rx != gvals.RX) callJS("native_axis('RX'," + rx + "," + idx + ");");
-		if (ry != gvals.RY) callJS("native_axis('RY'," + ry + "," + idx + ");");
-		if (hatx != gvals.HATX) callJS("native_axis('HATX'," + hatx + "," + idx + ");");
-		if (haty != gvals.HATY) callJS("native_axis('HATY'," + haty + "," + idx + ");");
+		if (ltrig != gvals.LTRIG || newidx) callJS("native_axis('LTRIG'," + ltrig + "," + idx + ");");
+		if (rtrig != gvals.RTRIG || newidx) callJS("native_axis('RTRIG'," + rtrig + "," + idx + ");");
+		if (lx != gvals.LX || newidx) callJS("native_axis('LX'," + lx + "," + idx + ");");
+		if (ly != gvals.LY || newidx) callJS("native_axis('LY'," + ly + "," + idx + ");");
+		if (rx != gvals.RX || newidx) callJS("native_axis('RX'," + rx + "," + idx + ");");
+		if (ry != gvals.RY || newidx) callJS("native_axis('RY'," + ry + "," + idx + ");");
+		if (hatx != gvals.HATX || newidx) callJS("native_axis('HATX'," + hatx + "," + idx + ");");
+		if (haty != gvals.HATY || newidx) callJS("native_axis('HATY'," + haty + "," + idx + ");");
 		
 		if (l) {
-			if (l != gvals.g_L) callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L || newidx) callJS("native_keydown(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			if (l != gvals.g_L) callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (l != gvals.g_L || newidx) callJS("native_keyup(-3000,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		if (r) {
-			if (r != gvals.g_R) callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R || newidx) callJS("native_keydown(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		else {
-			if (r != gvals.g_R) callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
+			if (r != gvals.g_R || newidx) callJS("native_keyup(-3001,"+ getDeviceIndex(ev.getDeviceId()) + ");");
 		}
 		
 		gvals.g_L = l;
