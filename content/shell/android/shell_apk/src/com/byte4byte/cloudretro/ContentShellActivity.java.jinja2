@@ -1264,7 +1264,7 @@ private void toastIt(String msg) {
 		if (hatx != gvals.HATX || newidx) callJS("native_axis('HATX'," + hatx + "," + idx + ");");
 		if (haty != gvals.HATY || newidx) callJS("native_axis('HATY'," + haty + "," + idx + ");");
 		
-		if (l) {
+		/*if (l) {
 			if (l != gvals.g_L || newidx) callJS("native_keydown(-3000,"+ idx + ");");
 		}
 		else {
@@ -1275,7 +1275,7 @@ private void toastIt(String msg) {
 		}
 		else {
 			if (r != gvals.g_R || newidx) callJS("native_keyup(-3001,"+ idx + ");");
-		}
+		}*/
 		
 		gvals.g_L = l;
 		gvals.g_R = r;
@@ -1450,6 +1450,8 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 	@Override
 	protected void onResume() {
 		super.onResume();
+		
+		callJS("setAppPause(false);");
 
 		try {
 			setKioskPolicies();
@@ -1476,6 +1478,9 @@ private BroadcastReceiver mMessageReceiver = new BroadcastReceiver() {
 	@Override
 	protected void onPause() {
 		active = false;
+		
+		callJS("setAppPause(true);");
+		
 // Unregister since the activity is not visible
   LocalBroadcastManager.getInstance(this)
                        .unregisterReceiver(mMessageReceiver);
