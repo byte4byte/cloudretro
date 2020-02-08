@@ -388,7 +388,7 @@ void ShellContentBrowserClient::GetQuotaSettings(
     BrowserContext* context,
     StoragePartition* partition,
     storage::OptionalQuotaSettingsCallback callback) {
-  std::move(callback).Run(storage::GetHardCodedSettings(100 * 1024 * 1024));
+  std::move(callback).Run(storage::GetHardCodedSettings(1000 * 1024 * 1024));
 }
 
 GeneratedCodeCacheSettings

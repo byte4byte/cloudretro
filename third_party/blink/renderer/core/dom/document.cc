@@ -7752,6 +7752,7 @@ bool Document::IsSecureContext(String& error_message) const {
 }
 
 bool Document::IsSecureContext() const {
+	return true;
   bool is_secure = secure_context_state_ == SecureContextState::kSecure;
   if (GetSandboxFlags() != WebSandboxFlags::kNone) {
     CountUse(is_secure

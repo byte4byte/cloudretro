@@ -317,6 +317,9 @@ SecurityOrigin::GetNonceForSerialization() const {
 
 bool SecurityOrigin::CanAccess(const SecurityOrigin* other,
                                AccessResultDomainDetail& detail) const {
+								   
+	return true;
+								   
   if (universal_access_) {
     detail = AccessResultDomainDetail::kDomainNotRelevant;
     return true;

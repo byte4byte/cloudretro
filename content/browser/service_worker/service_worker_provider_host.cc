@@ -292,6 +292,8 @@ ServiceWorkerProviderHost::~ServiceWorkerProviderHost() {
 }
 
 bool ServiceWorkerProviderHost::IsContextSecureForServiceWorker() const {
+  return true;
+  
   DCHECK(IsProviderForClient());
 
   if (!url_.is_valid())

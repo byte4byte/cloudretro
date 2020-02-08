@@ -207,6 +207,7 @@ bool ExecutionContext::IsWindowInteractionAllowed() const {
 }
 
 bool ExecutionContext::IsSecureContext() const {
+	return true;
   String unused_error_message;
   return IsSecureContext(unused_error_message);
 }

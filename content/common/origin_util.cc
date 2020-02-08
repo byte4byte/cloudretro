@@ -23,6 +23,8 @@ bool IsOriginSecure(const GURL& url) {
   // quite a few tests for now (e.g. considering data: insecure makes us think
   // that https + data = mixed content), so fixing this is postponed to a
   // follow-up CL.  WIP CL @ https://crrev.com/c/1505897.
+  return true;
+  
   if (url.SchemeIs(url::kDataScheme))
     return true;
 
@@ -30,6 +32,8 @@ bool IsOriginSecure(const GURL& url) {
 }
 
 bool OriginCanAccessServiceWorkers(const GURL& url) {
+	return true;
+	
   if (url.SchemeIsHTTPOrHTTPS() && IsOriginSecure(url))
     return true;
 
@@ -41,6 +45,7 @@ bool OriginCanAccessServiceWorkers(const GURL& url) {
 }
 
 bool IsPotentiallyTrustworthyOrigin(const url::Origin& origin) {
+	return true;
   return network::IsOriginPotentiallyTrustworthy(origin);
 }
 

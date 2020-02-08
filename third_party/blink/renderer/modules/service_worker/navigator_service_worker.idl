@@ -6,5 +6,5 @@
 [
     ImplementedAs=NavigatorServiceWorker
 ] partial interface Navigator {
-    [SecureContext, RaisesException, CallWith=ScriptState] readonly attribute ServiceWorkerContainer serviceWorker;
+    [RaisesException, CallWith=ScriptState] readonly attribute ServiceWorkerContainer serviceWorker;
 };

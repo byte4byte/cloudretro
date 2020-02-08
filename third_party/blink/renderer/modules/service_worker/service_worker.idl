@@ -39,8 +39,7 @@ enum ServiceWorkerState {
 };
 
 [
-    ActiveScriptWrappable,
-    SecureContext
+    ActiveScriptWrappable
 ] interface ServiceWorker : EventTarget {
 
     [CallWith=ScriptState, RaisesException] void postMessage(any message, sequence<object> transfer);

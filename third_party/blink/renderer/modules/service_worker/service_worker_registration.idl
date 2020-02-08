@@ -12,7 +12,6 @@ enum ServiceWorkerUpdateViaCache {
 // https://w3c.github.io/ServiceWorker/#serviceworkerregistration-interface
 [
     ActiveScriptWrappable,
-    SecureContext,
     Exposed=(Window,Worker)
 ] interface ServiceWorkerRegistration : EventTarget {
     readonly attribute ServiceWorker? installing;
