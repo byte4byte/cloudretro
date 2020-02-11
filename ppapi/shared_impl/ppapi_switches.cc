@@ -4,7 +4,7 @@
 
 #include "ppapi/shared_impl/ppapi_switches.h"
 
-#if 0
+#if defined(COMPONENT_BUILD)
 namespace switches {
 #if defined(OS_ANDROID)
 // Enables the testing interface for PPAPI.
